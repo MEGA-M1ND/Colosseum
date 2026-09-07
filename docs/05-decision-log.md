@@ -60,3 +60,17 @@ the runway risks disqualification for an unknown gain.
 
 **Reverses if:** the rules permit disclosed prior work, or the hackathon opens.
 Either way the design above is the spec and the program follows from it directly.
+
+## 2026-09-07 — Phase 2 balance-delta approach validated, with two required fixes
+
+Spike run against the real SPL Token program: post-CPI balance reads are fresh,
+and rejecting after the fact reverts atomically. The mechanism holds.
+
+Two demonstrated holes, both now covered by passing tests: `approve` grants
+authority at zero delta, and an unmetered second mint drains freely.
+
+**Consequence:** phase 2 must also assert `delegate`, `delegated_amount`,
+`owner` and `close_authority` are unchanged after the CPI. One mint per
+delegation is promoted from preference to tested requirement.
+
+**Reverses if:** nothing found so far. The approach survived the spike.

@@ -14,6 +14,10 @@ Prep workspace for the Colosseum Solana hackathon, **Sept 28 – Nov 2, 2026**.
 | [`docs/03-submission-strategy.md`](docs/03-submission-strategy.md) | What Colosseum rewards and how submissions are judged |
 | [`docs/04-agent-wallet-design.md`](docs/04-agent-wallet-design.md) | **The chosen build.** Account model, policy semantics, threat model, test plan |
 | [`docs/05-decision-log.md`](docs/05-decision-log.md) | What we decided, when, and why |
+| [`docs/06-phase2-spike-findings.md`](docs/06-phase2-spike-findings.md) | **Spike results.** What the balance-delta approach does and doesn't catch |
+
+Runnable code lives in [`spike/phase2-balance-delta/`](spike/phase2-balance-delta/)
+(`cargo test` — no validator needed).
 
 ## Setup
 
