@@ -110,3 +110,20 @@ means nothing applied to a basket.
 **Reverses if:** the scan proves too expensive in compute on a realistic
 instruction with many accounts. Measure before assuming; the loop is over
 accounts already in the list.
+
+## 2026-09-07 — Close the native SOL hole with a lamport floor
+
+Snapshot lamports on the vault PDA, the metered token account and every sibling;
+reject if any falls. Confirmed as a live exploit first: a System program
+transfer signed by the vault PDA drained the vault's SOL while passing every
+token-shaped check, because the attack never went near the token program.
+
+**Why a floor rather than a cap:** the delegation grants a token budget, not a
+SOL budget. Agent transaction fees are paid by the session key, not the vault,
+so ordinary operation never touches vault lamports.
+
+**Known cost:** an instruction where the vault legitimately pays rent is now
+rejected. Accepted — the demo path does not need it.
+
+**Reverses if:** a flow needs the vault to fund account creation. Then SOL gets
+an explicit allowance on the delegation, shaped like the token cap.

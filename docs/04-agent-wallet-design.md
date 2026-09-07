@@ -170,13 +170,15 @@ execute as the vault:
 1. target program ID ∈ delegation.allowed_programs
 2. snapshot the vault ATA: balance + authority fingerprint
 3. snapshot EVERY other vault-owned token account in remaining_accounts
-4. invoke_signed(instruction, remaining_accounts, vault_seeds)
-5. reload all snapshotted accounts
-6. authority fingerprint unchanged on all of them? else reject      (0x2)
-7. no other vault holding decreased? else reject                    (0x3)
-8. spent = before.checked_sub(after) on the metered account
-9. run spent through the same policy checks as agent_transfer       (0x1)
-10. commit counters
+4. snapshot lamports on the vault PDA and on every account above
+5. invoke_signed(instruction, remaining_accounts, vault_seeds)
+6. reload all snapshotted accounts
+7. no lamports left the vault? else reject                          (0x4)
+8. authority fingerprint unchanged on all of them? else reject      (0x2)
+9. no other vault holding decreased? else reject                    (0x3)
+10. spent = before.checked_sub(after) on the metered account
+11. run spent through the same policy checks as agent_transfer      (0x1)
+12. commit counters
 
 The **authority fingerprint** is owner ‖ delegate ‖ delegated_amount ‖
 close_authority — every field granting standing power over the account, with
@@ -257,7 +259,7 @@ that saves you." Script the injection so it's reproducible on camera.
 
 ## Open questions
 
-- **SOL as well as SPL tokens?** Native SOL needs different handling than the token CPI path. Recommendation: SPL only, note it as scoped.
+- ~~**SOL as well as SPL tokens?**~~ **Settled by the spike.** SOL is not spendable by the agent at all: a lamport floor on the vault PDA rejects any instruction that reduces it. A system transfer signed by the vault PDA was a live exploit before this. An explicit lamport allowance can come later if a rent-paying flow needs one.
 - **Multiple mints per delegation?** Recommendation: no. One mint per delegation keeps the balance-delta check sound in phase 2.
 - **Who pays transaction fees, agent or owner?** The agent needs some SOL for fees. Simplest is to fund the session key with a small amount and mention it.
 - **Should the delegation account close on revoke?** Closing refunds rent but loses the audit trail. Recommendation: keep it, flag `revoked`, and expose the spend history — an auditable record of what the agent did is itself a selling point.

@@ -508,3 +508,73 @@ async fn untouched_sibling_does_not_block_a_valid_spend() {
         "untouched sibling stays untouched"
     );
 }
+
+// ## F. The native SOL hole
+//
+// The vault PDA holds lamports of its own. A system transfer signed by the PDA
+// moves zero tokens, alters no authority field, and touches no sibling token
+// account - so every check so far is satisfied while the vault's SOL leaves.
+
+#[tokio::test]
+async fn sol_drain_is_rejected() {
+    let (pt, f) = fixture();
+    let mut pt = pt;
+    let attacker = Pubkey::new_unique();
+    pt.add_account(
+        attacker,
+        Account {
+            lamports: 1_000_000,
+            data: vec![],
+            owner: solana_sdk::system_program::id(),
+            executable: false,
+            rent_epoch: 0,
+        },
+    );
+    let mut ctx = pt.start_with_context().await;
+
+    let before = ctx
+        .banks_client
+        .get_account(f.vault_authority)
+        .await
+        .unwrap()
+        .unwrap()
+        .lamports;
+
+    // SystemInstruction::Transfer = variant 2 (u32 LE), then lamports (u64 LE).
+    let mut inner = 2u32.to_le_bytes().to_vec();
+    inner.extend_from_slice(&5_000_000u64.to_le_bytes());
+
+    let mut data = 100u64.to_le_bytes().to_vec(); // token cap, irrelevant here
+    data.extend_from_slice(&inner);
+
+    let ix = Instruction {
+        program_id: GUARD_ID,
+        accounts: vec![
+            AccountMeta::new(f.vault_authority, false), // writable: SOL leaves it
+            AccountMeta::new(f.vault_token, false),
+            AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+            AccountMeta::new(f.vault_authority, false),
+            AccountMeta::new(attacker, false),
+        ],
+        data,
+    };
+
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&ctx.payer.pubkey()),
+        &[&ctx.payer],
+        ctx.last_blockhash,
+    );
+    let res = ctx.banks_client.process_transaction(tx).await;
+
+    assert!(res.is_err(), "draining the vault's SOL must be rejected");
+
+    let after = ctx
+        .banks_client
+        .get_account(f.vault_authority)
+        .await
+        .unwrap()
+        .unwrap()
+        .lamports;
+    assert_eq!(after, before, "vault lamports must be intact");
+}

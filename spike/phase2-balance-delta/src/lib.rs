@@ -132,12 +132,12 @@ pub fn process_instruction(
     // The token program is learned from the metered account's owner rather than
     // hardcoded, so the guard still knows nothing it wasn't told.
     let token_program_id = *vault_token_account.owner;
-    let mut siblings: Vec<(&AccountInfo, u64, [u8; FINGERPRINT_LEN])> = Vec::new();
+    let mut siblings: Vec<(&AccountInfo, u64, [u8; FINGERPRINT_LEN], u64)> = Vec::new();
     for a in forwarded.iter() {
         if a.key == vault_token_account.key {
             continue; // the metered account, handled by the cap below
         }
-        if siblings.iter().any(|(s, _, _)| s.key == a.key) {
+        if siblings.iter().any(|(s, _, _, _)| s.key == a.key) {
             continue; // duplicate entry in the account list
         }
         if *a.owner != token_program_id {
@@ -149,9 +149,21 @@ pub fn process_instruction(
         if token_owner(a)? != *vault_authority.key {
             continue; // someone else's token account - not ours to protect
         }
-        siblings.push((a, token_amount(a)?, authority_fingerprint(a)?));
+        siblings.push((a, token_amount(a)?, authority_fingerprint(a)?, a.lamports()));
     }
     msg!("sibling vault accounts in scope: {}", siblings.len());
+
+    // ## Snapshot lamports on everything the vault owns
+    //
+    // The vault PDA holds native SOL of its own, and a system transfer signed by
+    // that PDA moves zero tokens - clearing every check above while the SOL
+    // leaves. Rent lamports sitting under the token accounts are value too.
+    //
+    // SOL is not what this delegation grants, so the rule is simply that it may
+    // not fall. Transaction fees come from the agent's own session key, not from
+    // here, so ordinary operation never trips this.
+    let vault_lamports_before = vault_authority.lamports();
+    let metered_lamports_before = vault_token_account.lamports();
 
     // ## Build and invoke the caller's instruction, unparsed
     //
@@ -197,15 +209,33 @@ pub fn process_instruction(
         return Err(ProgramError::Custom(2));
     }
 
+    // ## Enforce: no lamports may leave the vault
+    if vault_authority.lamports() < vault_lamports_before {
+        msg!(
+            "REJECTED: vault lamports fell {} -> {}",
+            vault_lamports_before,
+            vault_authority.lamports()
+        );
+        return Err(ProgramError::Custom(4));
+    }
+    if vault_token_account.lamports() < metered_lamports_before {
+        msg!("REJECTED: lamports drained from the metered token account");
+        return Err(ProgramError::Custom(4));
+    }
+
     // ## Enforce: no other vault holding may leave
     //
     // The delegation covers one mint. Everything else the vault owns must come
     // back untouched - it may grow, it may not shrink. This is what closes the
     // unmetered-mint hole, and it needs no knowledge of which mints exist.
-    for (a, sibling_before, sibling_fp) in siblings.iter() {
+    for (a, sibling_before, sibling_fp, sibling_lamports) in siblings.iter() {
         if authority_fingerprint(a)? != *sibling_fp {
             msg!("REJECTED: instruction altered an authority field on another vault account");
             return Err(ProgramError::Custom(2));
+        }
+        if a.lamports() < *sibling_lamports {
+            msg!("REJECTED: lamports drained from another vault token account");
+            return Err(ProgramError::Custom(4));
         }
         let sibling_after = token_amount(a)?;
         if sibling_after < *sibling_before {

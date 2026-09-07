@@ -1,19 +1,20 @@
 # Phase 2 spike — findings
 
-Run on 2026-09-07, then extended twice the same day to fix both holes it found.
-Code in [`../spike/phase2-balance-delta/`](../spike/phase2-balance-delta/).
-Six tests, all passing, executed against the **real SPL Token program** under
-`solana-program-test`.
+Run on 2026-09-07, then extended to fix all three holes it found. Code in
+[`../spike/phase2-balance-delta/`](../spike/phase2-balance-delta/).
+Seven tests, all passing, against the **real SPL Token and System programs**
+under `solana-program-test`.
 
 ## Verdict
 
 **The mechanism works. Build it.** Both holes the spike found are now closed in
 the spike itself, each with the exploit and its rejection kept as tests.
 
-A raw balance delta turned out to be two things short of sufficient: it bounds
-*movement* but not *authority*, and it bounds *one account* but not the vault.
-Both fixes take the same shape as the original check — measure more state, never
-parse the instruction — so the design's central claim survives intact.
+A raw token-balance delta turned out to be three things short of sufficient. It
+bounds *movement* but not *authority*; it bounds *one account* but not the
+vault; and it bounds *tokens* but not *SOL*. All three fixes take the same shape
+as the original check — measure more state, never parse the instruction — so the
+design's central claim survives intact.
 
 ## What was proven to work
 
@@ -42,6 +43,7 @@ written.
 | `approve_is_rejected` | zero-delta authority grant → rejected `0x2` |
 | `set_authority_is_rejected` | close-authority grant → rejected `0x2` |
 | `unmetered_mint_is_rejected` | drain of a second vault mint → rejected `0x3` |
+| `sol_drain_is_rejected` | system transfer of vault lamports → rejected `0x4` |
 | `untouched_sibling_does_not_block_a_valid_spend` | sibling in scope but unchanged → allowed |
 
 ## What was proven to break
@@ -122,23 +124,51 @@ that refuses everything is not a guard — this passes a second vault holding
 through the account list on a legitimate in-cap transfer and asserts it still
 succeeds. Being in scope is not the same as being touched.
 
+### Native SOL walked out — fixed
+
+`sol_drain_is_rejected` — the vault PDA holds lamports of its own. The agent
+invokes a **System program** transfer signed by that PDA. Zero tokens move, no
+authority field changes, no sibling token account is touched, so every check
+above was satisfied while the vault's SOL left. Confirmed as a live exploit
+before the fix: the transaction succeeded.
+
+Note this is a different program entirely — the attack never goes near the token
+program, which is precisely why token-shaped checks all passed.
+
+**The fix — a lamport floor.** Snapshot lamports on the vault PDA, the metered
+token account, and every sibling, and require none of them falls. SOL is not
+what the delegation grants, so the rule is simply that it may not leave.
+Transaction fees come from the agent's own session key rather than the vault, so
+ordinary operation never trips this. Rejects with `0x4`.
+
+Rent lamports under the token accounts are covered by the same snapshot. Closing
+a vault token account was already blocked — closure zeroes the data, and the
+post-CPI read then fails — but the lamport floor makes the intent explicit
+rather than incidental.
+
+**Known limitation:** an instruction where the vault legitimately pays rent (say,
+creating an ATA it will own) is now rejected. If that becomes necessary it wants
+an explicit lamport allowance on the delegation, in the same shape as the token
+cap. Not needed for the demo path.
+
 ## Consequences for the design
 
 1. **Authority fingerprint after every CPI — implemented and tested.** Carry it into the program as-is.
 2. **Scope every vault-owned token account in the forwarded list — implemented and tested.** The metered one gets the cap; the rest must not shrink.
 3. **Keep one mint per delegation anyway.** It is now defence in depth rather than the sole mitigation, and it keeps the accounting legible: a cap denominated in USDC means nothing applied to a basket.
-4. **Meter native SOL lamports on the vault PDA, or explicitly scope SOL out.** Still not covered by the spike, and the same reasoning applies: an unmeasured field is a hole.
+4. **Lamport floor on the vault PDA and every vault token account — implemented and tested.** Add an explicit lamport allowance later only if a rent-paying flow needs one.
 
 Error codes are distinct on purpose, so a test cannot pass for the wrong reason
 and a user can tell what stopped them: `0x1` over cap, `0x2` authority altered,
-`0x3` unmetered holding fell.
+`0x3` unmetered holding fell, `0x4` lamports left the vault.
 
 The generalisation worth carrying into the pitch: **a delta check is only as
 good as the set of things it measures.** Every field an attacker can change that
-you don't read is a hole, and so is every account. Both fixes here came from
-widening what gets measured, not from learning to recognise an attack — which is
-the property that makes the approach worth building on. Enumerate what you
-measure, don't enumerate the attacks.
+you don't read is a hole, so is every account, and so is every asset. All three
+fixes here came from widening what gets measured, not from learning to recognise
+an attack — which is the property that makes the approach worth building on. The
+SOL hole is the clearest illustration: the attack never touched the token
+program at all. Enumerate what you measure, don't enumerate the attacks.
 
 ## Environment note
 
@@ -149,7 +179,7 @@ during the hackathon if you don't know it going in.
 
 ## Not covered
 
-- Native SOL movement
+- An explicit lamport allowance for flows where the vault must legitimately pay rent
 - Freezing the vault account (denial of service rather than theft; needs the mint's freeze authority, not the vault's)
 - CPI depth beyond one level
 - Compute cost of the delta check under a realistic instruction

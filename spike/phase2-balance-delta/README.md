@@ -13,17 +13,18 @@ Findings are written up in [`../../docs/06-phase2-spike-findings.md`](../../docs
 
 ```bash
 cd spike/phase2-balance-delta
-cargo test                       # 6 tests
+cargo test                       # 7 tests
 cargo test -- --nocapture        # with program logs
 ```
 
 No validator and no SBF toolchain needed. `solana-program-test` runs both the
-guard and the real SPL Token program natively in-process via `processor!`.
+guard and the real SPL Token program natively in-process via `processor!`; the
+System program is a runtime builtin, so the SOL test exercises the real one too.
 
 ## Files
 
-- `src/lib.rs` — the guard: snapshot balance, authority fields and sibling vault holdings; `invoke_signed` blind; re-measure; reject
-- `tests/delta.rs` — six cases: two allowed, three attacks rejected, one over-rejection guard
+- `src/lib.rs` — the guard: snapshot token balances, authority fields, sibling holdings and lamports; `invoke_signed` blind; re-measure; reject
+- `tests/delta.rs` — seven cases: two allowed, four attacks rejected, one over-rejection guard
 
 ## Version pinning matters
 
