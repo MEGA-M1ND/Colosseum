@@ -338,14 +338,20 @@ async fn set_authority_is_rejected() {
     );
 }
 
-// ## D. The unmetered-mint hole
+// ## Two-mint fixture
 //
-// The guard meters exactly one token account. Give the vault a second mint and
-// the agent moves it out freely - the delta on the metered account is zero.
-// This is why the design constrains a delegation to a single mint.
+// One vault authority holding two different mints, so a delegation scoped to
+// mint A can be tested against the vault's mint B holdings.
 
-#[tokio::test]
-async fn unmetered_mint_drains_freely() {
+struct TwoMint {
+    vault_authority: Pubkey,
+    vault_a: Pubkey,
+    dest_a: Pubkey,
+    vault_b: Pubkey,
+    dest_b: Pubkey,
+}
+
+fn two_mint_fixture() -> (ProgramTest, TwoMint) {
     let mut pt = ProgramTest::new("spike", GUARD_ID, processor!(spike::process_instruction));
     pt.add_program(
         "spl_token",
@@ -354,13 +360,11 @@ async fn unmetered_mint_drains_freely() {
     );
 
     let (vault_authority, _) = Pubkey::find_program_address(&[spike::VAULT_SEED], &GUARD_ID);
-
-    // Mint A - the one the guard watches.
     let mint_a = Pubkey::new_unique();
-    let vault_a = Pubkey::new_unique();
-    // Mint B - same vault, not watched.
     let mint_b = Pubkey::new_unique();
+    let vault_a = Pubkey::new_unique();
     let vault_b = Pubkey::new_unique();
+    let dest_a = Pubkey::new_unique();
     let dest_b = Pubkey::new_unique();
     let dest_owner = Pubkey::new_unique();
 
@@ -373,6 +377,10 @@ async fn unmetered_mint_drains_freely() {
     pt.add_account(
         vault_b,
         spl_account(token_account_data(&mint_b, &vault_authority, START_BALANCE)),
+    );
+    pt.add_account(
+        dest_a,
+        spl_account(token_account_data(&mint_a, &dest_owner, 0)),
     );
     pt.add_account(
         dest_b,
@@ -389,9 +397,30 @@ async fn unmetered_mint_drains_freely() {
         },
     );
 
+    (
+        pt,
+        TwoMint {
+            vault_authority,
+            vault_a,
+            dest_a,
+            vault_b,
+            dest_b,
+        },
+    )
+}
+
+// ## D. The unmetered-mint hole - now closed
+//
+// The guard is pointed at the vault's mint-A account; the instruction moves
+// mint B. Before the fix the delta on A was zero and it sailed through. Now
+// every vault-owned token account reachable by the CPI is snapshotted, and any
+// that shrinks is a rejection.
+
+#[tokio::test]
+async fn unmetered_mint_is_rejected() {
+    let (pt, f) = two_mint_fixture();
     let mut ctx = pt.start_with_context().await;
 
-    // Meter vault_a, but move everything out of vault_b.
     let mut inner = vec![3u8];
     inner.extend_from_slice(&START_BALANCE.to_le_bytes());
 
@@ -401,12 +430,12 @@ async fn unmetered_mint_drains_freely() {
     let ix = Instruction {
         program_id: GUARD_ID,
         accounts: vec![
-            AccountMeta::new_readonly(vault_authority, false),
-            AccountMeta::new(vault_a, false), // <- the metered account
+            AccountMeta::new_readonly(f.vault_authority, false),
+            AccountMeta::new(f.vault_a, false), // <- the metered account
             AccountMeta::new_readonly(spl_token::id(), false),
-            AccountMeta::new(vault_b, false), // <- what actually moves
-            AccountMeta::new(dest_b, false),
-            AccountMeta::new_readonly(vault_authority, false),
+            AccountMeta::new(f.vault_b, false), // <- what the instruction moves
+            AccountMeta::new(f.dest_b, false),
+            AccountMeta::new_readonly(f.vault_authority, false),
         ],
         data,
     };
@@ -417,16 +446,65 @@ async fn unmetered_mint_drains_freely() {
         &[&ctx.payer],
         ctx.last_blockhash,
     );
-    let res = ctx.banks_client.process_transaction(tx).await;
-
     assert!(
-        res.is_ok(),
-        "guard sees no change on the metered account, so it allows it"
+        ctx.banks_client.process_transaction(tx).await.is_err(),
+        "draining an unmetered vault holding must be rejected"
     );
-    assert_eq!(balance(&mut ctx.banks_client, vault_a).await, START_BALANCE);
     assert_eq!(
-        balance(&mut ctx.banks_client, vault_b).await,
-        0,
-        "unmetered mint drained past a 100-token cap"
+        balance(&mut ctx.banks_client, f.vault_b).await,
+        START_BALANCE,
+        "mint B must be intact"
+    );
+    assert_eq!(balance(&mut ctx.banks_client, f.vault_a).await, START_BALANCE);
+    assert_eq!(balance(&mut ctx.banks_client, f.dest_b).await, 0);
+}
+
+// ## E. The fix must not over-reject
+//
+// A guard that refuses everything is not a guard. A vault account merely being
+// present in the account list is fine - only a decrease is a rejection.
+
+#[tokio::test]
+async fn untouched_sibling_does_not_block_a_valid_spend() {
+    let (pt, f) = two_mint_fixture();
+    let mut ctx = pt.start_with_context().await;
+
+    // Transfer 50 of mint A, within the cap, while mint B rides along unused.
+    let mut inner = vec![3u8];
+    inner.extend_from_slice(&50u64.to_le_bytes());
+
+    let mut data = 100u64.to_le_bytes().to_vec();
+    data.extend_from_slice(&inner);
+
+    let ix = Instruction {
+        program_id: GUARD_ID,
+        accounts: vec![
+            AccountMeta::new_readonly(f.vault_authority, false),
+            AccountMeta::new(f.vault_a, false),
+            AccountMeta::new_readonly(spl_token::id(), false),
+            // spl-token Transfer reads the first three; vault_b is a trailing
+            // extra the guard still puts in scope.
+            AccountMeta::new(f.vault_a, false),
+            AccountMeta::new(f.dest_a, false),
+            AccountMeta::new_readonly(f.vault_authority, false),
+            AccountMeta::new(f.vault_b, false),
+        ],
+        data,
+    };
+
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&ctx.payer.pubkey()),
+        &[&ctx.payer],
+        ctx.last_blockhash,
+    );
+    ctx.banks_client.process_transaction(tx).await.unwrap();
+
+    assert_eq!(balance(&mut ctx.banks_client, f.vault_a).await, 950);
+    assert_eq!(balance(&mut ctx.banks_client, f.dest_a).await, 50);
+    assert_eq!(
+        balance(&mut ctx.banks_client, f.vault_b).await,
+        START_BALANCE,
+        "untouched sibling stays untouched"
     );
 }

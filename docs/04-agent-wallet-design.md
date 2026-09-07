@@ -168,13 +168,15 @@ execute as the vault:
 
 ```
 1. target program ID ∈ delegation.allowed_programs
-2. record vault ATA balance AND authority fingerprint BEFORE
-3. invoke_signed(instruction, remaining_accounts, vault_seeds)
-4. reload the token account
-5. authority fingerprint unchanged? else reject   <- checked first; see the spike
-6. spent = before.checked_sub(after)
-7. run spent through the same policy checks as agent_transfer
-8. commit counters
+2. snapshot the vault ATA: balance + authority fingerprint
+3. snapshot EVERY other vault-owned token account in remaining_accounts
+4. invoke_signed(instruction, remaining_accounts, vault_seeds)
+5. reload all snapshotted accounts
+6. authority fingerprint unchanged on all of them? else reject      (0x2)
+7. no other vault holding decreased? else reject                    (0x3)
+8. spent = before.checked_sub(after) on the metered account
+9. run spent through the same policy checks as agent_transfer       (0x1)
+10. commit counters
 
 The **authority fingerprint** is owner ‖ delegate ‖ delegated_amount ‖
 close_authority — every field granting standing power over the account, with
@@ -189,9 +191,10 @@ what left the vault. That generalizes to programs that didn't exist when you
 wrote yours, which is exactly the property an agent seatbelt needs.
 
 Known gaps to state honestly rather than paper over:
-- Only accounts you check are measured. An instruction that moves a *different*
-  mint out of a different vault ATA isn't caught unless you check that ATA too.
-  Constrain the delegation to a single mint and check that one — and say so.
+- ~~Only accounts you check are measured.~~ **Closed by step 3 above** — every
+  vault-owned token account reachable by the CPI is snapshotted, and a CPI can
+  only touch accounts passed to it, so the scan is complete. One mint per
+  delegation stays as defence in depth.
 - ~~Approvals aren't spends.~~ **Closed by the authority fingerprint above** —
   demonstrated as an exploit and then as a passing rejection in the spike. It
   covers `set_authority` too, without the guard learning what either

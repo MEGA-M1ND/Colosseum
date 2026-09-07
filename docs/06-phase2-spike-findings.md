@@ -1,16 +1,19 @@
 # Phase 2 spike — findings
 
-Run on 2026-09-07, updated the same day with the fix for the `approve` hole.
+Run on 2026-09-07, then extended twice the same day to fix both holes it found.
 Code in [`../spike/phase2-balance-delta/`](../spike/phase2-balance-delta/).
-Five tests, all passing, executed against the **real SPL Token program** under
+Six tests, all passing, executed against the **real SPL Token program** under
 `solana-program-test`.
 
 ## Verdict
 
-**The mechanism works. Build it.** A balance delta alone is a cap on token
-*movement*, not on *authority* — and that gap was exploitable. It is now closed
-in the spike by fingerprinting the authority fields; one hole remains, and the
-design already handles it.
+**The mechanism works. Build it.** Both holes the spike found are now closed in
+the spike itself, each with the exploit and its rejection kept as tests.
+
+A raw balance delta turned out to be two things short of sufficient: it bounds
+*movement* but not *authority*, and it bounds *one account* but not the vault.
+Both fixes take the same shape as the original check — measure more state, never
+parse the instruction — so the design's central claim survives intact.
 
 ## What was proven to work
 
@@ -38,7 +41,8 @@ written.
 | `over_budget_is_rejected_and_reverted` | 500 of a 100 cap → rejected `0x1`, vault back to 1000 |
 | `approve_is_rejected` | zero-delta authority grant → rejected `0x2` |
 | `set_authority_is_rejected` | close-authority grant → rejected `0x2` |
-| `unmetered_mint_drains_freely` | still passes — see below |
+| `unmetered_mint_is_rejected` | drain of a second vault mint → rejected `0x3` |
+| `untouched_sibling_does_not_block_a_valid_spend` | sibling in scope but unchanged → allowed |
 
 ## What was proven to break
 
@@ -87,25 +91,54 @@ authority over the vault account is also a zero-token operation, and the same
 fingerprint catches it — also confirmed as `0x2`, so it is genuinely the guard
 rejecting rather than the token program failing for an unrelated reason.
 
-### An unmetered mint drains freely
+### An unmetered mint drained freely — fixed
 
-`unmetered_mint_drains_freely` — the vault holds two mints. The guard meters
-mint A; the agent moves all of mint B. Delta on A is zero, so it is allowed.
+`unmetered_mint_is_rejected` (was `unmetered_mint_drains_freely`) — the vault
+holds two mints. The guard was pointed at mint A; the agent moved all of mint B.
+Delta on A was zero, so **before the fix it was allowed**, past a cap of 100.
 
-**Fix:** this is what the "one mint per delegation" decision already buys, and
-the test is the evidence for it. Worth also asserting the vault holds no other
-token accounts, or metering every account passed in `remaining_accounts` that
-the vault owns.
+**The fix — put every vault holding the CPI can reach in scope.** Before the
+call, scan the forwarded account list for anything that is a token account owned
+by the vault authority, and snapshot each one. After the call, the metered
+account is bounded by the cap and **every other vault holding must not shrink**.
+It may grow; it may not fall.
+
+Two properties make this work:
+
+**The scan is complete.** A CPI can only touch accounts that were passed to it,
+so everything the instruction could possibly drain is already in the forwarded
+list. There is no hidden account for the agent to reach.
+
+**The token program is not hardcoded.** The guard learns it from the metered
+account's own `owner` field, then treats any forwarded account with that owner,
+a token-account-sized buffer, and a token-owner matching the vault as a sibling.
+The guard still knows nothing it was not told, which keeps the
+works-against-unknown-programs claim honest.
+
+Rejects with `custom program error: 0x3`, distinct from the authority check.
+
+`untouched_sibling_does_not_block_a_valid_spend` is the counterweight. A guard
+that refuses everything is not a guard — this passes a second vault holding
+through the account list on a legitimate in-cap transfer and asserts it still
+succeeds. Being in scope is not the same as being touched.
 
 ## Consequences for the design
 
-1. **Authority fingerprint after every CPI — implemented and tested in the spike.** Carry it into the program as-is.
-2. **Keep one mint per delegation.** Now a tested requirement, not a preference: `unmetered_mint_drains_freely` still passes, and that is by design — the fingerprint covers authority, not scope. Constraining the delegation to a single mint is what closes it.
-3. **Meter native SOL lamports on the vault PDA, or explicitly scope SOL out.** The spike did not cover it and the same reasoning applies: an unmeasured field is a hole.
+1. **Authority fingerprint after every CPI — implemented and tested.** Carry it into the program as-is.
+2. **Scope every vault-owned token account in the forwarded list — implemented and tested.** The metered one gets the cap; the rest must not shrink.
+3. **Keep one mint per delegation anyway.** It is now defence in depth rather than the sole mitigation, and it keeps the accounting legible: a cap denominated in USDC means nothing applied to a basket.
+4. **Meter native SOL lamports on the vault PDA, or explicitly scope SOL out.** Still not covered by the spike, and the same reasoning applies: an unmeasured field is a hole.
+
+Error codes are distinct on purpose, so a test cannot pass for the wrong reason
+and a user can tell what stopped them: `0x1` over cap, `0x2` authority altered,
+`0x3` unmetered holding fell.
 
 The generalisation worth carrying into the pitch: **a delta check is only as
 good as the set of things it measures.** Every field an attacker can change that
-you don't read is a hole. Enumerate the fields, don't enumerate the attacks.
+you don't read is a hole, and so is every account. Both fixes here came from
+widening what gets measured, not from learning to recognise an attack — which is
+the property that makes the approach worth building on. Enumerate what you
+measure, don't enumerate the attacks.
 
 ## Environment note
 

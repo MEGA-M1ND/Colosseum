@@ -123,6 +123,36 @@ pub fn process_instruction(
     let authority_before = authority_fingerprint(vault_token_account)?;
     msg!("balance before: {}", before);
 
+    // ## Snapshot every OTHER vault-owned token account the CPI can reach
+    //
+    // A cap on one account says nothing about the vault's other holdings. A CPI
+    // can only touch accounts that were passed to it, so scanning the forwarded
+    // set is complete: anything the instruction could drain is in here.
+    //
+    // The token program is learned from the metered account's owner rather than
+    // hardcoded, so the guard still knows nothing it wasn't told.
+    let token_program_id = *vault_token_account.owner;
+    let mut siblings: Vec<(&AccountInfo, u64, [u8; FINGERPRINT_LEN])> = Vec::new();
+    for a in forwarded.iter() {
+        if a.key == vault_token_account.key {
+            continue; // the metered account, handled by the cap below
+        }
+        if siblings.iter().any(|(s, _, _)| s.key == a.key) {
+            continue; // duplicate entry in the account list
+        }
+        if *a.owner != token_program_id {
+            continue; // not a token account
+        }
+        if a.try_borrow_data()?.len() < 165 {
+            continue; // a mint, or something else entirely
+        }
+        if token_owner(a)? != *vault_authority.key {
+            continue; // someone else's token account - not ours to protect
+        }
+        siblings.push((a, token_amount(a)?, authority_fingerprint(a)?));
+    }
+    msg!("sibling vault accounts in scope: {}", siblings.len());
+
     // ## Build and invoke the caller's instruction, unparsed
     //
     // The guard has no idea what this instruction does. That is the point: it
@@ -165,6 +195,27 @@ pub fn process_instruction(
     if authority_after != authority_before {
         msg!("REJECTED: instruction altered an authority field on the vault account");
         return Err(ProgramError::Custom(2));
+    }
+
+    // ## Enforce: no other vault holding may leave
+    //
+    // The delegation covers one mint. Everything else the vault owns must come
+    // back untouched - it may grow, it may not shrink. This is what closes the
+    // unmetered-mint hole, and it needs no knowledge of which mints exist.
+    for (a, sibling_before, sibling_fp) in siblings.iter() {
+        if authority_fingerprint(a)? != *sibling_fp {
+            msg!("REJECTED: instruction altered an authority field on another vault account");
+            return Err(ProgramError::Custom(2));
+        }
+        let sibling_after = token_amount(a)?;
+        if sibling_after < *sibling_before {
+            msg!(
+                "REJECTED: unmetered vault account fell {} -> {}",
+                sibling_before,
+                sibling_after
+            );
+            return Err(ProgramError::Custom(3));
+        }
     }
 
     // ## Enforce: the spend is within cap

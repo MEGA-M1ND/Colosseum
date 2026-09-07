@@ -90,3 +90,23 @@ free, which is the evidence the generalisation is real.
 **Reverses if:** a legitimate integration needs the agent to set a delegate.
 Then the allowance becomes explicit policy on the delegation rather than a
 blanket prohibition.
+
+## 2026-09-07 — Close the unmetered-mint hole by scoping the whole account list
+
+Before the CPI, snapshot every token account in the forwarded list that the
+vault owns. After it, the metered account is bounded by the cap and no other
+vault holding may shrink.
+
+**Why this is sound:** a CPI can only touch accounts passed to it, so scanning
+the forwarded list covers everything the instruction could reach. The token
+program is learned from the metered account's `owner` rather than hardcoded, so
+the guard still knows nothing it was not told.
+
+**Consequence for an earlier entry:** one-mint-per-delegation is no longer the
+only thing standing between an agent and the vault's other holdings. Keep it as
+defence in depth and for legible accounting — a cap denominated in one token
+means nothing applied to a basket.
+
+**Reverses if:** the scan proves too expensive in compute on a realistic
+instruction with many accounts. Measure before assuming; the loop is over
+accounts already in the list.
