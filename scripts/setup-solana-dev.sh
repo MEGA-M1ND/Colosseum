@@ -12,6 +12,7 @@ WORKSPACE="${1:-scratch}"
 say() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# ## Prerequisites
 say "Checking prerequisites"
 
 if ! have rustc; then
@@ -36,6 +37,7 @@ if ! have yarn; then
 fi
 echo "yarn:   $(yarn --version)"
 
+# ## Solana CLI
 if ! have solana; then
   say "Installing Solana CLI (Anza)"
   sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
@@ -46,6 +48,7 @@ if ! have solana; then
 fi
 echo "solana: $(solana --version)"
 
+# ## Anchor
 if ! have avm; then
   say "Installing avm (Anchor version manager) — this compiles from source, give it a few minutes"
   cargo install --git https://github.com/coral-xyz/anchor avm --force
@@ -58,6 +61,7 @@ if ! have anchor; then
 fi
 echo "anchor: $(anchor --version)"
 
+# ## Devnet + keypair
 say "Configuring devnet"
 solana config set --url devnet
 
@@ -73,6 +77,7 @@ say "Requesting a devnet airdrop"
 # The public faucet rate-limits aggressively; failure here is normal and not fatal.
 solana airdrop 2 || echo "Airdrop failed (rate limited). Use https://faucet.solana.com or retry later."
 
+# ## Scaffold
 if [ -d "$WORKSPACE" ]; then
   echo "Directory '$WORKSPACE' already exists — skipping scaffold generation."
 else

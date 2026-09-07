@@ -2,6 +2,8 @@
 
 Prep workspace for the Colosseum Solana hackathon, **Sept 28 – Nov 2, 2026**.
 
+**Decided: spend-limited agent wallets.** See [`docs/04-agent-wallet-design.md`](docs/04-agent-wallet-design.md).
+
 ## Read in this order
 
 | Doc | What it's for |
@@ -10,6 +12,8 @@ Prep workspace for the Colosseum Solana hackathon, **Sept 28 – Nov 2, 2026**.
 | [`docs/01-idea-candidates.md`](docs/01-idea-candidates.md) | Candidate directions + the filter for choosing one |
 | [`docs/02-solana-ramp.md`](docs/02-solana-ramp.md) | The Solana concepts that actually bite, in dependency order |
 | [`docs/03-submission-strategy.md`](docs/03-submission-strategy.md) | What Colosseum rewards and how submissions are judged |
+| [`docs/04-agent-wallet-design.md`](docs/04-agent-wallet-design.md) | **The chosen build.** Account model, policy semantics, threat model, test plan |
+| [`docs/05-decision-log.md`](docs/05-decision-log.md) | What we decided, when, and why |
 
 ## Setup
 
@@ -35,3 +39,18 @@ These docs were written in a sandbox with no access to `release.anza.xyz`,
 The setup script generates its scaffold with `anchor init` rather than hand-written
 files, specifically so you get whatever the real toolchain produces instead of
 something written blind against a guessed version.
+
+## Conventions
+
+Every file in this repo is divided by `##` section markers — `## Heading` in
+markdown, `// ## Heading` or `# ## Heading` in code. Sections are the unit of
+edit: to change something, locate its section and rewrite only that.
+
+Get the map of any file without reading it:
+
+```bash
+grep -n '^#\{1,3\} \|^[/#]\+ ## ' README.md docs/*.md scripts/*.sh
+```
+
+Keep headings stable once written. Renaming one invalidates every reference to
+it, including the cross-links between docs.
