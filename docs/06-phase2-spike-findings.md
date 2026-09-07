@@ -1,14 +1,16 @@
 # Phase 2 spike — findings
 
-Run on 2026-09-07. Code in [`../spike/phase2-balance-delta/`](../spike/phase2-balance-delta/).
-Four tests, all passing, executed against the **real SPL Token program** under
+Run on 2026-09-07, updated the same day with the fix for the `approve` hole.
+Code in [`../spike/phase2-balance-delta/`](../spike/phase2-balance-delta/).
+Five tests, all passing, executed against the **real SPL Token program** under
 `solana-program-test`.
 
 ## Verdict
 
-**The mechanism works. Build it.** But it is a *cap on token movement*, not a
-cap on authority, and the difference is exploitable in two specific ways that
-the spike demonstrates rather than speculates about.
+**The mechanism works. Build it.** A balance delta alone is a cap on token
+*movement*, not on *authority* — and that gap was exploitable. It is now closed
+in the spike by fingerprinting the authority fields; one hole remains, and the
+design already handles it.
 
 ## What was proven to work
 
@@ -33,7 +35,10 @@ written.
 | Test | Result |
 |---|---|
 | `within_budget_is_allowed` | 50 of a 100 cap → allowed, vault 1000 → 950 |
-| `over_budget_is_rejected_and_reverted` | 500 of a 100 cap → rejected, vault back to 1000 |
+| `over_budget_is_rejected_and_reverted` | 500 of a 100 cap → rejected `0x1`, vault back to 1000 |
+| `approve_is_rejected` | zero-delta authority grant → rejected `0x2` |
+| `set_authority_is_rejected` | close-authority grant → rejected `0x2` |
+| `unmetered_mint_drains_freely` | still passes — see below |
 
 ## What was proven to break
 
@@ -41,24 +46,46 @@ Both holes from the design doc were suspected. Both are now demonstrated with a
 passing test, which is a much stronger position for judging — you found them
 yourself and can say what you did about it.
 
-### `approve` slips straight through
+### `approve` slipped straight through — fixed
 
-`approve_slips_past_the_delta_check` — the agent calls SPL Token `Approve` for
-the vault's entire 1000-token balance while under a 100-token cap. It moves no
-tokens, so the delta is zero and **the guard allows it**. The delegate then
-transfers the full balance in a separate transaction that never touches the
-guard. Vault ends at 0, past a cap of 100.
+`approve_is_rejected` (was `approve_slips_past_the_delta_check`) — the agent
+calls SPL Token `Approve` for the vault's entire 1000-token balance while under
+a 100-token cap. It moves no tokens, so the delta is zero. **Before the fix the
+guard allowed it**, and the delegate then drained the full balance in a separate
+transaction that never touched the guard.
 
-This is the sharpest hole. A balance delta measures value *movement*; `approve`
+This was the sharpest hole. A balance delta measures value *movement*; `approve`
 grants *authority*, which costs nothing until it is used.
 
-**Fix:** the delegation must reject instructions that grant standing authority.
-Because the guard deliberately doesn't parse instructions, the check has to be
-structural — after the CPI, assert the metered account's `delegate` field is
-still unset and `delegated_amount` is still zero. Same shape as the balance
-check: measure state, don't interpret intent. Also assert the account's `owner`
-and `close_authority` are unchanged, since `SetAuthority` is the same class of
-attack.
+**The fix — an authority fingerprint.** Snapshot every field on the token
+account that grants standing power over it, and require it comes back unchanged:
+
+```
+owner            [32..64]
+delegate         [72..108]    (COption tag + pubkey)
+delegated_amount [121..129]
+close_authority  [129..165]   (COption tag + pubkey)
+```
+
+`amount` is deliberately excluded — that one is allowed to change, and the delta
+check is what bounds it.
+
+The important property is that this does **not** forfeit the design. The guard
+still never parses the instruction. It takes a second measurement of state
+instead of interpreting intent, which is the same move as the balance check.
+That means it catches instructions nobody has written yet, in exactly the way
+the balance check does.
+
+Verified by error code, not just by "the transaction failed":
+the guard rejects with `custom program error: 0x2` (the fingerprint check),
+the delegation is reverted rather than merely flagged, and the attacker's
+follow-up drain then fails with token program error `0x4` — there is no
+delegation to spend against.
+
+`set_authority_is_rejected` covers the same class: handing an attacker close
+authority over the vault account is also a zero-token operation, and the same
+fingerprint catches it — also confirmed as `0x2`, so it is genuinely the guard
+rejecting rather than the token program failing for an unrelated reason.
 
 ### An unmetered mint drains freely
 
@@ -72,11 +99,9 @@ the vault owns.
 
 ## Consequences for the design
 
-Three changes to [`04-agent-wallet-design.md`](04-agent-wallet-design.md) phase 2:
-
-1. After the CPI, assert on the metered account: `delegate == None`, `delegated_amount == 0`, `owner` unchanged, `close_authority == None`. Reject otherwise.
-2. Keep one mint per delegation. It is now a tested requirement, not a preference.
-3. Meter native SOL lamports on the vault PDA as well, or explicitly scope SOL out. The spike did not cover it.
+1. **Authority fingerprint after every CPI — implemented and tested in the spike.** Carry it into the program as-is.
+2. **Keep one mint per delegation.** Now a tested requirement, not a preference: `unmetered_mint_drains_freely` still passes, and that is by design — the fingerprint covers authority, not scope. Constraining the delegation to a single mint is what closes it.
+3. **Meter native SOL lamports on the vault PDA, or explicitly scope SOL out.** The spike did not cover it and the same reasoning applies: an unmeasured field is a hole.
 
 The generalisation worth carrying into the pitch: **a delta check is only as
 good as the set of things it measures.** Every field an attacker can change that
@@ -92,6 +117,7 @@ during the hackathon if you don't know it going in.
 ## Not covered
 
 - Native SOL movement
+- Freezing the vault account (denial of service rather than theft; needs the mint's freeze authority, not the vault's)
 - CPI depth beyond one level
 - Compute cost of the delta check under a realistic instruction
 - Anchor integration (the spike is a native program; Anchor is ergonomics, not mechanism)

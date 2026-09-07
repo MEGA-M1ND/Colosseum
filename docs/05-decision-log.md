@@ -74,3 +74,19 @@ authority at zero delta, and an unmetered second mint drains freely.
 delegation is promoted from preference to tested requirement.
 
 **Reverses if:** nothing found so far. The approach survived the spike.
+
+## 2026-09-07 — Close the approve hole with an authority fingerprint
+
+Rather than blocklisting `approve`, snapshot every field on the token account
+that grants standing power — owner, delegate, delegated_amount, close_authority
+— and require it unchanged after the CPI. `amount` is excluded; the delta check
+bounds that.
+
+**Why this shape:** blocklisting instructions would forfeit the design's whole
+claim, which is that the guard works against programs it has never seen. A
+second state measurement keeps that property. It caught `set_authority` for
+free, which is the evidence the generalisation is real.
+
+**Reverses if:** a legitimate integration needs the agent to set a delegate.
+Then the allowance becomes explicit policy on the delegation rather than a
+blanket prohibition.

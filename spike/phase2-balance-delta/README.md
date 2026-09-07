@@ -13,7 +13,7 @@ Findings are written up in [`../../docs/06-phase2-spike-findings.md`](../../docs
 
 ```bash
 cd spike/phase2-balance-delta
-cargo test                       # 4 tests
+cargo test                       # 5 tests
 cargo test -- --nocapture        # with program logs
 ```
 
@@ -23,7 +23,7 @@ guard and the real SPL Token program natively in-process via `processor!`.
 ## Files
 
 - `src/lib.rs` — the guard: read balance, `invoke_signed` blind, read again, reject on excess
-- `tests/delta.rs` — four cases, two of which are attacks that succeed
+- `tests/delta.rs` — five cases: two allowed, two attacks rejected, one attack that still works by design (see findings)
 
 ## Version pinning matters
 

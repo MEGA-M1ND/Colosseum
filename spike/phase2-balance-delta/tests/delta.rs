@@ -129,6 +129,18 @@ async fn balance(bc: &mut solana_program_test::BanksClient, key: Pubkey) -> u64 
     u64::from_le_bytes(acct.data[64..72].try_into().unwrap())
 }
 
+/// COption discriminant for the delegate field: 0 = None, 1 = Some.
+async fn delegate_tag(bc: &mut solana_program_test::BanksClient, key: Pubkey) -> u32 {
+    let acct = bc.get_account(key).await.unwrap().unwrap();
+    u32::from_le_bytes(acct.data[72..76].try_into().unwrap())
+}
+
+/// COption discriminant for the close_authority field.
+async fn close_authority_tag(bc: &mut solana_program_test::BanksClient, key: Pubkey) -> u32 {
+    let acct = bc.get_account(key).await.unwrap().unwrap();
+    u32::from_le_bytes(acct.data[129..133].try_into().unwrap())
+}
+
 // ## A. Within budget -> allowed
 
 #[tokio::test]
@@ -202,13 +214,15 @@ async fn over_budget_is_rejected_and_reverted() {
     assert_eq!(balance(&mut ctx.banks_client, f.dest_token).await, 0);
 }
 
-// ## C. The approve hole
+// ## C. The approve hole - now closed
 //
-// `approve` moves no tokens, so the delta is zero and the guard allows it.
-// The delegate then drains the vault directly, never touching the guard.
+// `approve` moves no tokens, so the balance delta is zero. Before the fix the
+// guard allowed it and the delegate drained the vault afterwards. The authority
+// fingerprint catches it: the delegate field changed, so the CPI is rejected
+// and reverted.
 
 #[tokio::test]
-async fn approve_slips_past_the_delta_check() {
+async fn approve_is_rejected() {
     let (pt, f) = fixture();
     let mut ctx = pt.start_with_context().await;
 
@@ -235,19 +249,23 @@ async fn approve_slips_past_the_delta_check() {
         &[&ctx.payer],
         ctx.last_blockhash,
     );
-    let approved = ctx.banks_client.process_transaction(tx).await;
+    let res = ctx.banks_client.process_transaction(tx).await;
 
     assert!(
-        approved.is_ok(),
-        "approve costs nothing now, so the delta check lets it through"
+        res.is_err(),
+        "approve grants standing authority at zero delta and must be rejected"
+    );
+    assert_eq!(
+        delegate_tag(&mut ctx.banks_client, f.vault_token).await,
+        0,
+        "delegation must be reverted, not merely flagged"
     );
     assert_eq!(
         balance(&mut ctx.banks_client, f.vault_token).await,
-        START_BALANCE,
-        "no tokens moved yet - which is exactly why it passed"
+        START_BALANCE
     );
 
-    // Now the delegate spends the full balance, outside the guard entirely.
+    // And the attacker has no delegation to spend against.
     let mut drain = vec![3u8];
     drain.extend_from_slice(&START_BALANCE.to_le_bytes());
     let drain_ix = Instruction {
@@ -259,19 +277,64 @@ async fn approve_slips_past_the_delta_check() {
         ],
         data: drain,
     };
-
     let tx = Transaction::new_signed_with_payer(
         &[drain_ix],
         Some(&ctx.payer.pubkey()),
         &[&ctx.payer, &attacker],
         ctx.last_blockhash,
     );
-    ctx.banks_client.process_transaction(tx).await.unwrap();
-
+    assert!(
+        ctx.banks_client.process_transaction(tx).await.is_err(),
+        "the follow-up drain must fail - there is no delegation"
+    );
     assert_eq!(
         balance(&mut ctx.banks_client, f.vault_token).await,
+        START_BALANCE,
+        "vault intact"
+    );
+}
+
+// ## C2. SetAuthority is the same class of attack
+//
+// Handing over close authority (or ownership) also costs zero tokens now. The
+// same fingerprint covers it without the guard knowing what SetAuthority is.
+
+#[tokio::test]
+async fn set_authority_is_rejected() {
+    let (pt, f) = fixture();
+    let mut ctx = pt.start_with_context().await;
+
+    let attacker = Keypair::new();
+
+    // spl-token SetAuthority = tag 6; AuthorityType::CloseAccount = 3;
+    // new_authority is packed as a 1-byte Some/None tag then the pubkey.
+    let mut inner = vec![6u8, 3u8, 1u8];
+    inner.extend_from_slice(attacker.pubkey().as_ref());
+
+    let ix = guarded(
+        &f,
+        100,
+        inner,
+        vec![
+            AccountMeta::new(f.vault_token, false),
+            AccountMeta::new_readonly(f.vault_authority, false),
+        ],
+    );
+
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&ctx.payer.pubkey()),
+        &[&ctx.payer],
+        ctx.last_blockhash,
+    );
+    assert!(
+        ctx.banks_client.process_transaction(tx).await.is_err(),
+        "granting close authority must be rejected"
+    );
+    assert_eq!(
+        close_authority_tag(&mut ctx.banks_client, f.vault_token).await,
         0,
-        "vault drained through a delegation the guard never metered"
+        "close authority must be unset after the revert"
     );
 }
 

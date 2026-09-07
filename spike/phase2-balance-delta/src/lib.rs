@@ -26,9 +26,13 @@ pub const VAULT_SEED: &[u8] = b"vault";
 // Read the fields directly rather than going through Pack: spl-token and
 // solana-program pull in different solana-program-pack versions, and the
 // layout is fixed and stable anyway.
-//   [0..32]  mint
-//   [32..64] owner
-//   [64..72] amount (u64 LE)
+//   [0..32]    mint
+//   [32..64]   owner
+//   [64..72]   amount (u64 LE)
+//   [72..108]  delegate       (COption tag u32 LE + pubkey)
+//   [108]      state
+//   [121..129] delegated_amount (u64 LE)
+//   [129..165] close_authority (COption tag u32 LE + pubkey)
 
 fn token_owner(ai: &AccountInfo) -> Result<Pubkey, ProgramError> {
     let raw = ai.try_borrow_data()?;
@@ -44,6 +48,33 @@ fn token_amount(ai: &AccountInfo) -> Result<u64, ProgramError> {
         return Err(ProgramError::InvalidAccountData);
     }
     Ok(u64::from_le_bytes(raw[64..72].try_into().unwrap()))
+}
+
+// ## Authority fingerprint
+//
+// Every field on the token account that grants someone standing power over it,
+// concatenated. `amount` is deliberately excluded - that one is allowed to
+// change, and the delta check is what bounds it.
+//
+// This is the fix for the `approve` hole. A balance delta measures value
+// LEAVING; `approve` and `set_authority` grant the right to take it later, at
+// zero delta. Rather than start parsing instructions - which would forfeit the
+// whole point of the design - snapshot these fields and require they come back
+// untouched. Still measuring state, still not interpreting intent.
+
+const FINGERPRINT_LEN: usize = 112;
+
+fn authority_fingerprint(ai: &AccountInfo) -> Result<[u8; FINGERPRINT_LEN], ProgramError> {
+    let raw = ai.try_borrow_data()?;
+    if raw.len() < 165 {
+        return Err(ProgramError::InvalidAccountData);
+    }
+    let mut fp = [0u8; FINGERPRINT_LEN];
+    fp[0..32].copy_from_slice(&raw[32..64]);     // owner
+    fp[32..68].copy_from_slice(&raw[72..108]);   // delegate
+    fp[68..76].copy_from_slice(&raw[121..129]);  // delegated_amount
+    fp[76..112].copy_from_slice(&raw[129..165]); // close_authority
+    Ok(fp)
 }
 
 // ## Instruction data
@@ -89,6 +120,7 @@ pub fn process_instruction(
         return Err(ProgramError::IllegalOwner);
     }
     let before = token_amount(vault_token_account)?;
+    let authority_before = authority_fingerprint(vault_token_account)?;
     msg!("balance before: {}", before);
 
     // ## Build and invoke the caller's instruction, unparsed
@@ -124,7 +156,18 @@ pub fn process_instruction(
     let after = token_amount(vault_token_account)?;
     msg!("balance after: {}", after);
 
-    // ## Enforce
+    // ## Enforce: no authority may have been granted
+    //
+    // Checked before the balance test because it is the cheaper rejection and
+    // the more dangerous condition - an authority grant costs nothing now and
+    // everything later, so a zero delta here is not reassuring.
+    let authority_after = authority_fingerprint(vault_token_account)?;
+    if authority_after != authority_before {
+        msg!("REJECTED: instruction altered an authority field on the vault account");
+        return Err(ProgramError::Custom(2));
+    }
+
+    // ## Enforce: the spend is within cap
     let spent = before.saturating_sub(after);
     msg!("spent: {} (cap {})", spent, cap);
     if spent > cap {

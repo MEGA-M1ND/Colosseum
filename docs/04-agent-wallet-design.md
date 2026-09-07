@@ -168,12 +168,19 @@ execute as the vault:
 
 ```
 1. target program ID ∈ delegation.allowed_programs
-2. record vault ATA balance BEFORE
+2. record vault ATA balance AND authority fingerprint BEFORE
 3. invoke_signed(instruction, remaining_accounts, vault_seeds)
-4. reload the token account; record balance AFTER
-5. spent = before.checked_sub(after)
-6. run spent through the same policy checks as agent_transfer
-7. commit counters
+4. reload the token account
+5. authority fingerprint unchanged? else reject   <- checked first; see the spike
+6. spent = before.checked_sub(after)
+7. run spent through the same policy checks as agent_transfer
+8. commit counters
+
+The **authority fingerprint** is owner ‖ delegate ‖ delegated_amount ‖
+close_authority — every field granting standing power over the account, with
+`amount` excluded because the delta check bounds that one. Validated in
+[`../spike/phase2-balance-delta/`](../spike/phase2-balance-delta/); see
+[`06-phase2-spike-findings.md`](06-phase2-spike-findings.md).
 ```
 
 Why this is interesting: the program never parses the target instruction. It
@@ -185,10 +192,10 @@ Known gaps to state honestly rather than paper over:
 - Only accounts you check are measured. An instruction that moves a *different*
   mint out of a different vault ATA isn't caught unless you check that ATA too.
   Constrain the delegation to a single mint and check that one — and say so.
-- Approvals aren't spends. A call that sets a token delegate costs nothing now
-  and everything later. Either forbid the SPL `approve` instruction or note the
-  limitation. **Do not skip this one; it's the sharpest hole and a good judge
-  will find it.**
+- ~~Approvals aren't spends.~~ **Closed by the authority fingerprint above** —
+  demonstrated as an exploit and then as a passing rejection in the spike. It
+  covers `set_authority` too, without the guard learning what either
+  instruction is.
 - CPI depth is 4. Deeply nested targets will fail.
 
 ## Security checklist
