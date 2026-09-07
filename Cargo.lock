@@ -126,6 +126,7 @@ version = "0.1.0"
 dependencies = [
  "anchor-lang",
  "anchor-spl",
+ "serde_json",
  "solana-program-test",
  "solana-sdk",
  "spl-token 8.0.0",

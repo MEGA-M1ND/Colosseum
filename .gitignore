@@ -21,3 +21,8 @@ scratch/
 target/
 .anchor/
 test-ledger/
+
+# Frontend
+app/node_modules/
+app/dist/
+app/*.tsbuildinfo

@@ -150,3 +150,26 @@ matters more than native tests. Migration is two mechanical edits.
 **Not verified anywhere yet:** `anchor build`, the SBF binary, the IDL, and
 deployment. `cargo-build-sbf` needs `release.anza.xyz`, which is blocked here.
 Run `anchor build && anchor test` locally before trusting the deploy path.
+
+## 2026-09-07 — Frontend builds instructions by hand, cross-checked against the program
+
+No generated IDL: `anchor build` needs the SBF toolchain, which is unreachable
+here. So the client hand-builds discriminators, Borsh encoding, account order,
+and the account decoders.
+
+**The risk that creates:** every one of those is invisible until it fails
+on-chain with an opaque error, which on a demo day means failing in front of
+judges.
+
+**The mitigation:** the Rust test suite emits reference vectors from the
+program's own Anchor types, and `npm run check:wire` rebuilds every call in
+TypeScript and byte-compares — nine instructions, twenty error codes, both
+account layouts, and the PDAs. It passed on the first run and is the closest
+thing to an integration test available without an RPC endpoint.
+
+**Reverses if:** the SBF toolchain becomes reachable. Then generate the IDL, use
+`@coral-xyz/anchor`, and keep the wire check as a regression test against it.
+
+**Not verified:** no transaction path has run against a live cluster. Typecheck,
+production build and the wire check pass; the RPC calls themselves are
+unexercised. Walk the demo path on devnet before relying on it.

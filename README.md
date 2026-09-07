@@ -16,10 +16,11 @@ Prep workspace for the Colosseum Solana hackathon, **Sept 28 – Nov 2, 2026**.
 | [`docs/05-decision-log.md`](docs/05-decision-log.md) | What we decided, when, and why |
 | [`docs/06-phase2-spike-findings.md`](docs/06-phase2-spike-findings.md) | **Spike results.** What the balance-delta approach does and doesn't catch |
 | [`programs/agent-wallet/`](programs/agent-wallet/) | **The program.** Anchor implementation, 22 tests |
+| [`app/`](app/) | **The frontend.** Demo surface, with a wire check against the program |
 
-Runnable code: the program in [`programs/agent-wallet/`](programs/agent-wallet/)
-and the spike in [`spike/phase2-balance-delta/`](spike/phase2-balance-delta/).
-Both run under `cargo test` with no validator.
+Runnable code: the program in [`programs/agent-wallet/`](programs/agent-wallet/),
+the frontend in [`app/`](app/), and the spike in
+[`spike/phase2-balance-delta/`](spike/phase2-balance-delta/).
 
 ## Setup
 
