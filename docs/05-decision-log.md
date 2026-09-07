@@ -127,3 +127,26 @@ rejected. Accepted — the demo path does not need it.
 
 **Reverses if:** a flow needs the vault to fund account creation. Then SOL gets
 an explicit allowance on the delegation, shaped like the token cap.
+
+## 2026-09-07 — Write the program; pin Anchor 0.31 rather than 1.2
+
+The program is written and tested: nine instructions, 22 passing tests against
+the real SPL Token program.
+
+**Anchor 0.31.1, not 1.2.** Anchor 1.2 depends on `solana-invoke` 0.5, whose
+non-SBF path is a bare `unimplemented!()` with no stub fallback and no feature
+flag. Any CPI — including `init`, which creates accounts via the system program
+— panics under `solana-program-test`'s native executor. Choosing 1.2 would have
+traded the entire test suite for a version number.
+
+The program was compiled clean against 1.2 first, so the migration surface is
+known and small: `Context` lost its extra lifetimes, and `CpiContext::new` takes
+the program id rather than its `AccountInfo`. Both are recorded in the program
+README.
+
+**Reverses if:** the SBF toolchain becomes reachable, or you decide current-Anchor
+matters more than native tests. Migration is two mechanical edits.
+
+**Not verified anywhere yet:** `anchor build`, the SBF binary, the IDL, and
+deployment. `cargo-build-sbf` needs `release.anza.xyz`, which is blocked here.
+Run `anchor build && anchor test` locally before trusting the deploy path.
