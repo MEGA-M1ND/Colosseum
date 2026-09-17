@@ -1,5 +1,10 @@
 # Prep plan: Sept 7 → Sept 28
 
+> **Superseded on 17 Sep 2026.** The real hackathon window is shorter than the
+> secondhand dates this was built on: the submission deadline is **12 October**.
+> The live schedule is [`07-build-schedule.md`](07-build-schedule.md). This file
+> is kept for the reasoning in "Standing risks", which still holds.
+
 You have 3 weeks of runway and then a 5-week build. The goal of the runway is
 **not** to build the product early — check the rules on pre-existing code
 first **(verify)**. The goal is that on day 1 nothing is a new skill.

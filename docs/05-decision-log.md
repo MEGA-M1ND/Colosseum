@@ -173,3 +173,17 @@ thing to an integration test available without an RPC endpoint.
 **Not verified:** no transaction path has run against a live cluster. Typecheck,
 production build and the wire check pass; the RPC calls themselves are
 unexercised. Walk the demo path on devnet before relying on it.
+
+## 2026-09-17 — Real deadline is 12 October, not 2 November
+
+The user confirmed the hackathon has started and the submission deadline is
+12 Oct. The Sept 28 – Nov 2 window used until now came from search results
+about the *spring* edition and was wrong.
+
+**Consequence:** 25 days, not the eight weeks the prep plan assumed.
+`00-prep-plan.md` is superseded by `07-build-schedule.md`. Week 1 is entirely
+devnet deployment, because nothing in this project has ever run on a chain.
+
+**Also decided:** disclose prior work in the submission rather than keep waiting
+on a rules answer. The commit history is public and dated; volunteering it costs
+nothing and hiding it is not an option.

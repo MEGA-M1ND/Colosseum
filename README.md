@@ -1,6 +1,6 @@
 # Colosseum Fall 2026 — Hackathon Prep
 
-Prep workspace for the Colosseum Solana hackathon, **Sept 28 – Nov 2, 2026**.
+Colosseum Solana hackathon. **Submission deadline: 12 October 2026.**
 
 **Decided: spend-limited agent wallets.** See [`docs/04-agent-wallet-design.md`](docs/04-agent-wallet-design.md).
 
@@ -8,7 +8,10 @@ Prep workspace for the Colosseum Solana hackathon, **Sept 28 – Nov 2, 2026**.
 
 | Doc | What it's for |
 |---|---|
-| [`docs/00-prep-plan.md`](docs/00-prep-plan.md) | Week-by-week plan for the 3 weeks before the clock starts |
+| [`docs/07-build-schedule.md`](docs/07-build-schedule.md) | **The live plan.** 17 Sep → 12 Oct, week by week |
+| [`SUBMISSION.md`](SUBMISSION.md) | Judge-facing README draft |
+| [`docs/08-demo-video.md`](docs/08-demo-video.md) | Shot list for the demo video |
+| [`docs/00-prep-plan.md`](docs/00-prep-plan.md) | Superseded prep plan; kept for its risk list |
 | [`docs/01-idea-candidates.md`](docs/01-idea-candidates.md) | Candidate directions + the filter for choosing one |
 | [`docs/02-solana-ramp.md`](docs/02-solana-ramp.md) | The Solana concepts that actually bite, in dependency order |
 | [`docs/03-submission-strategy.md`](docs/03-submission-strategy.md) | What Colosseum rewards and how submissions are judged |
