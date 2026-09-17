@@ -8,6 +8,7 @@ Colosseum Solana hackathon. **Submission deadline: 12 October 2026.**
 
 | Doc | What it's for |
 |---|---|
+| [`docs/09-runbook.md`](docs/09-runbook.md) | **Start here.** Getting it running on your machine |
 | [`docs/07-build-schedule.md`](docs/07-build-schedule.md) | **The live plan.** 17 Sep → 12 Oct, week by week |
 | [`SUBMISSION.md`](SUBMISSION.md) | Judge-facing README draft |
 | [`docs/08-demo-video.md`](docs/08-demo-video.md) | Shot list for the demo video |

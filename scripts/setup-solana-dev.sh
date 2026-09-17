@@ -54,10 +54,14 @@ if ! have avm; then
   cargo install --git https://github.com/coral-xyz/anchor avm --force
 fi
 
-if ! have anchor; then
-  say "Installing latest Anchor"
-  avm install latest
-  avm use latest
+# The program pins anchor-lang = "=0.31.1". Installing "latest" gets Anchor
+# 1.x, whose CPI and Context APIs differ - the build fails with confusing type
+# errors. Pin the CLI to match the crate.
+ANCHOR_VERSION="0.31.1"
+if ! have anchor || ! anchor --version 2>/dev/null | grep -q "$ANCHOR_VERSION"; then
+  say "Installing Anchor $ANCHOR_VERSION (matches the program's pinned anchor-lang)"
+  avm install "$ANCHOR_VERSION"
+  avm use "$ANCHOR_VERSION"
 fi
 echo "anchor: $(anchor --version)"
 
